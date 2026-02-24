@@ -23,19 +23,25 @@ export default function EditarClientePage({ params }: { params: { id: string } }
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
+
     async function load() {
       try {
         const res = await fetch(`/api/clientes/${params.id}`);
         if (!res.ok) throw new Error("Erro ao carregar cliente");
         const data = (await res.json()) as Client;
-        setClient(data);
+        if (!cancelled) setClient(data);
       } catch (e: unknown) {
-        setError(errMsg(e));
+        if (!cancelled) setError(errMsg(e));
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }
+
     load();
+    return () => {
+      cancelled = true;
+    };
   }, [params.id]);
 
   async function onSubmit(ev: React.FormEvent<HTMLFormElement>) {
@@ -57,7 +63,7 @@ export default function EditarClientePage({ params }: { params: { id: string } }
         throw new Error(body?.error ?? "Erro ao guardar alterações");
       }
 
-      router.push(`/dashboard/clientes/${params.id}`);
+      router.push("/dashboard/clientes");
     } catch (e: unknown) {
       setError(errMsg(e));
     } finally {

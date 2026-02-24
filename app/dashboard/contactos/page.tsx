@@ -24,7 +24,7 @@ export default function ContactosPage() {
         if (!res.ok) throw new Error('Erro ao carregar contactos');
         const data = await res.json();
         setContactos(data);
-      } catch (err: any) {
+      } catch (err: unknown) {
         setError(err.message);
       } finally {
         setLoading(false);

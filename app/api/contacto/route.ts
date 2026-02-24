@@ -1,130 +1,153 @@
-// app/api/contacto/route.ts
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import nodemailer from "nodemailer";
 import { z } from "zod";
-import { Resend } from "resend";
-import { prisma } from "@/lib/prisma";
 
-function s(v: any) {
-  if (v === undefined || v === null) return "";
-  return String(v).trim();
+/**
+ * Normaliza valores para string (sem usar any)
+ */
+function toStr(v: unknown): string | undefined {
+  if (v === null || v === undefined) return undefined;
+  if (typeof v === "string") return v.trim();
+  if (typeof v === "number") return String(v);
+  return undefined;
 }
 
+/**
+ * Aceita vários nomes de campos (PT/EN) + honeypot "company"
+ */
 const IncomingSchema = z.object({
-  // PT
-  nome: z.any().optional(),
-  telefone: z.any().optional(),
-  telemovel: z.any().optional(),
-  numero: z.any().optional(),
-  mensagem: z.any().optional(),
-  conteudo: z.any().optional(),
+  nome: z.unknown().optional(),
+  name: z.unknown().optional(),
 
-  // EN
-  name: z.any().optional(),
-  phone: z.any().optional(),
-  message: z.any().optional(),
+  email: z.unknown().optional(),
 
-  // comum
-  email: z.any().optional(),
-  company: z.any().optional(), // honeypot
+  telefone: z.unknown().optional(),
+  telemovel: z.unknown().optional(),
+  numero: z.unknown().optional(),
+  phone: z.unknown().optional(),
+
+  mensagem: z.unknown().optional(),
+  conteudo: z.unknown().optional(),
+  message: z.unknown().optional(),
+
+  assunto: z.unknown().optional(),
+
+  company: z.unknown().optional(), // honeypot anti-spam
 });
 
-const NormalizedSchema = z.object({
-  nome: z.string().min(2, "Nome obrigatório"),
-  telefone: z.string().optional(),
-  email: z.string().email("Email inválido"),
-  conteudo: z.string().min(5, "Mensagem obrigatória"),
-  company: z.string().optional(),
-});
+type Incoming = z.infer<typeof IncomingSchema>;
 
-function normalize(raw: any) {
-  return {
-    nome: s(raw.nome ?? raw.name),
-    telefone: s(raw.telefone ?? raw.telemovel ?? raw.numero ?? raw.phone),
-    email: s(raw.email),
-    conteudo: s(raw.conteudo ?? raw.mensagem ?? raw.message),
-    company: s(raw.company),
-  };
+function errorMessage(e: unknown) {
+  return e instanceof Error ? e.message : "Erro desconhecido";
 }
 
-async function readBody(req: Request) {
-  const contentType = req.headers.get("content-type") || "";
+function normalize(raw: Incoming) {
+  const nome = toStr(raw.nome) ?? toStr(raw.name);
+  const email = toStr(raw.email);
 
-  if (contentType.includes("application/json")) return await req.json();
+  const telefone =
+    toStr(raw.telefone) ?? toStr(raw.telemovel) ?? toStr(raw.numero) ?? toStr(raw.phone);
 
-  if (contentType.includes("multipart/form-data")) {
-    const form = await req.formData();
-    return Object.fromEntries(form.entries());
-  }
+  const mensagem = toStr(raw.mensagem) ?? toStr(raw.conteudo) ?? toStr(raw.message);
+  const assunto = toStr(raw.assunto);
+  const company = toStr(raw.company);
 
-  if (contentType.includes("application/x-www-form-urlencoded")) {
-    const text = await req.text();
-    return Object.fromEntries(new URLSearchParams(text));
-  }
-
-  return await req.json().catch(async () => {
-    const text = await req.text().catch(() => "");
-    return text ? { raw: text } : {};
-  });
+  return { nome, email, telefone, mensagem, assunto, company };
 }
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
-    const raw = await readBody(req);
+    const json = (await req.json()) as unknown;
+    const parsed = IncomingSchema.safeParse(json);
 
-    const incoming = IncomingSchema.parse(raw);
-    const normalized = normalize(incoming);
+    if (!parsed.success) {
+      return NextResponse.json({ error: "Dados inválidos." }, { status: 400 });
+    }
 
-    // Honeypot anti-spam
+    const normalized = normalize(parsed.data);
+
+    // Honeypot: se preenchido, é spam
     if (normalized.company && normalized.company.length > 0) {
       return NextResponse.json({ ok: true }, { status: 200 });
     }
 
-    const data = NormalizedSchema.parse(normalized);
-
-    // 1) Guardar na BD (ContactMessage)
-    await prisma.contactMessage.create({
-      data: {
-        nome: data.nome,
-        telefone: data.telefone || null,
-        email: data.email,
-        conteudo: data.conteudo,
-      },
-    });
-
-    // 2) Enviar email (Resend)
-    const apiKey = process.env.RESEND_API_KEY;
-    const toEmail = process.env.CONTACT_TO_EMAIL;
-    const fromEmail = process.env.CONTACT_FROM_EMAIL || "onboarding@resend.dev";
-
-    if (!apiKey || !toEmail) {
+    if (!normalized.nome || !normalized.email || !normalized.mensagem) {
       return NextResponse.json(
-        { ok: true, warning: "Email não configurado (RESEND_API_KEY/CONTACT_TO_EMAIL)." },
-        { status: 200 }
+        { error: "Campos obrigatórios em falta (nome, email, mensagem)." },
+        { status: 400 }
       );
     }
 
-    const resend = new Resend(apiKey);
+    // SMTP envs
+    const SMTP_HOST = process.env.SMTP_HOST;
+    const SMTP_PORT = process.env.SMTP_PORT;
+    const SMTP_USER = process.env.SMTP_USER;
+    const SMTP_PASS = process.env.SMTP_PASS;
+    const SMTP_FROM = process.env.SMTP_FROM;
+    const CONTACT_RECEIVER_EMAIL = process.env.CONTACT_RECEIVER_EMAIL;
 
-    await resend.emails.send({
-      from: fromEmail,
-      to: toEmail,
-      replyTo: data.email,
-      subject: `Novo contacto: ${data.nome}`,
+    // Log seguro (não mostra password)
+    console.log("SMTP CHECK:", {
+      host: SMTP_HOST,
+      port: SMTP_PORT,
+      user: SMTP_USER,
+      passLen: SMTP_PASS?.length,
+      from: SMTP_FROM,
+      to: CONTACT_RECEIVER_EMAIL,
+    });
+
+    if (
+      !SMTP_HOST ||
+      !SMTP_PORT ||
+      !SMTP_USER ||
+      !SMTP_PASS ||
+      !SMTP_FROM ||
+      !CONTACT_RECEIVER_EMAIL
+    ) {
+      return NextResponse.json(
+        { error: "Variáveis SMTP em falta no ambiente (Vercel/.env)." },
+        { status: 500 }
+      );
+    }
+
+    const port = Number(SMTP_PORT);
+    if (!Number.isFinite(port)) {
+      return NextResponse.json({ error: "SMTP_PORT inválido." }, { status: 500 });
+    }
+
+    const secure = port === 465;
+
+    const transporter = nodemailer.createTransport({
+      host: SMTP_HOST,
+      port,
+      secure,
+      auth: { user: SMTP_USER, pass: SMTP_PASS },
+      tls: { minVersion: "TLSv1.2" },
+    });
+
+    await transporter.verify();
+
+    await transporter.sendMail({
+      from: SMTP_FROM,
+      to: CONTACT_RECEIVER_EMAIL,
+      replyTo: normalized.email,
+      subject: `Novo contacto${normalized.assunto ? ` - ${normalized.assunto}` : ""} - ${
+        normalized.nome
+      }`,
       text:
-        `Nome: ${data.nome}\n` +
-        `Telefone: ${data.telefone || "-"}\n` +
-        `Email: ${data.email}\n\n` +
-        `Mensagem:\n${data.conteudo}\n`,
+        `Novo contacto recebido:\n\n` +
+        `Nome: ${normalized.nome}\n` +
+        `Telefone: ${normalized.telefone ?? "-"}\n` +
+        `Email: ${normalized.email}\n\n` +
+        `Mensagem:\n${normalized.mensagem}\n`,
     });
 
     return NextResponse.json({ ok: true }, { status: 200 });
-  } catch (err: any) {
-    console.error("CONTACT ERROR:", err);
-
-    if (err?.name === "ZodError") {
-      return NextResponse.json({ ok: false, errors: err.errors }, { status: 400 });
-    }
-
-    return NextResponse.json({ ok: false, error: "Erro ao enviar contacto." }, { status: 500 });
+  } catch (err: unknown) {
+    console.error("ERRO CONTACTO:", err);
+    return NextResponse.json(
+      { error: "Não foi possível processar o contacto.", detail: errorMessage(err) },
+      { status: 500 }
+    );
   }
 }

@@ -15,6 +15,7 @@ const ServiceUpdateSchema = z.object({
 });
 
 export async function GET(
+  _request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
@@ -28,12 +29,18 @@ export async function GET(
     });
 
     if (!servico) {
-      return NextResponse.json({ error: "Serviço não encontrado." }, { status: 404 });
+      return NextResponse.json(
+        { error: "Serviço não encontrado." },
+        { status: 404 }
+      );
     }
 
     return NextResponse.json(servico);
   } catch {
-    return NextResponse.json({ error: "Erro ao carregar serviço." }, { status: 500 });
+    return NextResponse.json(
+      { error: "Erro ao carregar serviço." },
+      { status: 500 }
+    );
   }
 }
 
@@ -68,11 +75,15 @@ export async function PUT(
 
     return NextResponse.json(updated);
   } catch {
-    return NextResponse.json({ error: "Erro ao atualizar serviço." }, { status: 400 });
+    return NextResponse.json(
+      { error: "Erro ao atualizar serviço." },
+      { status: 400 }
+    );
   }
 }
 
 export async function DELETE(
+  _request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {

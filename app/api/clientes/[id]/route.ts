@@ -7,6 +7,7 @@ import { authOptions } from "@/lib/auth";
 export const runtime = "nodejs";
 
 export async function GET(
+  _request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   const session = await getServerSession(authOptions);
@@ -16,7 +17,10 @@ export async function GET(
 
   const client = await prisma.client.findUnique({ where: { id: params.id } });
   if (!client) {
-    return NextResponse.json({ error: "Cliente não encontrado." }, { status: 404 });
+    return NextResponse.json(
+      { error: "Cliente não encontrado." },
+      { status: 404 }
+    );
   }
 
   return NextResponse.json(client);
@@ -46,11 +50,15 @@ export async function PUT(
     });
     return NextResponse.json(client);
   } catch {
-    return NextResponse.json({ error: "Erro ao atualizar cliente." }, { status: 400 });
+    return NextResponse.json(
+      { error: "Erro ao atualizar cliente." },
+      { status: 400 }
+    );
   }
 }
 
 export async function DELETE(
+  _request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   const session = await getServerSession(authOptions);

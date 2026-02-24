@@ -7,7 +7,6 @@ import { authOptions } from "@/lib/auth";
 export const runtime = "nodejs";
 
 export async function GET(
-  _req: NextRequest,
   { params }: { params: { id: string } }
 ) {
   const session = await getServerSession(authOptions);
@@ -52,7 +51,6 @@ export async function PUT(
 }
 
 export async function DELETE(
-  _req: NextRequest,
   { params }: { params: { id: string } }
 ) {
   const session = await getServerSession(authOptions);

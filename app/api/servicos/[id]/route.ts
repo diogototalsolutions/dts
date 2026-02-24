@@ -15,7 +15,6 @@ const ServiceUpdateSchema = z.object({
 });
 
 export async function GET(
-  _req: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
@@ -74,7 +73,6 @@ export async function PUT(
 }
 
 export async function DELETE(
-  _req: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
